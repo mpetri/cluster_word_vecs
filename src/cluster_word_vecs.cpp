@@ -238,13 +238,11 @@ int main(int argc, char const* argv[])
         std::vector<float> centroid_sizes(num_clusters, 0.0f);
         for (size_t i = 0; i < raw_out_assignments.size(); i++) {
             size_t cid = raw_out_assignments[i];
-
             clusters.insert({ cid, i });
-
             const float* centr
                 = output_centroids + (cid * vec_data.num_features);
             const float* vecptr = input_samples + (i * vec_data.num_features);
-            centroid_dist[i]
+            centroid_dists[i]
                 = compute_euq_distance(centr, vecptr, vec_data.num_features);
             total_centroid_dists[cid] += centroid_dist[i];
             centroid_sizes[cid]++;
@@ -252,7 +250,7 @@ int main(int argc, char const* argv[])
 
         for (auto& x : clusters) {
             std::string word = vec_data.word_str[x.second];
-            auto dist = centroid_dist[x.second];
+            auto dist = centroid_dists[x.second];
             auto avg_dist
                 = total_centroid_dists[x.first] / centroid_sizes[x.first];
             std::cout << x.first << ": " << word << " " << dist << " "
