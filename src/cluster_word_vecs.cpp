@@ -244,7 +244,7 @@ int main(int argc, char const* argv[])
             const float* vecptr = input_samples + (i * vec_data.num_features);
             centroid_dists[i]
                 = compute_euq_distance(centr, vecptr, vec_data.num_features);
-            total_centroid_dists[cid] += centroid_dist[i];
+            total_centroid_dists[cid] += centroid_dists[i];
             centroid_sizes[cid]++;
         }
 
