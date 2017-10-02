@@ -1,0 +1,9 @@
+BasedOnStyle: WebKit
+IndentWidth: 4
+Language: Cpp
+DerivePointerAlignment: false
+PointerAlignment: Left
+ColumnLimit: 80
+AlignAfterOpenBracket: Align
+BinPackParameters: false
+BinPackArguments: false
