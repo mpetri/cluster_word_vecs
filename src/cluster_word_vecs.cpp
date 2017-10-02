@@ -1,11 +1,12 @@
 #include <cstdint>
+#include <experimental/string_view>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <random>
 #include <sstream>
 #include <unordered_map>
 #include <vector>
-#include <experimental/string_view>
 
 #include "kmcuda.h"
 
@@ -26,65 +27,34 @@ struct vector_data {
     std::vector<std::string> word_str;
 };
 
-struct vector_data_f16 {
-    std::vector<uint16_t> dat;
-    size_t num_samples = 0;
-    size_t num_features = 0;
-    std::vector<std::string> word_str;
-};
-
-
-const char*
-parse_line(const char* cur_line,char* word_buf,float* float_data,size_t max_word_len,size_t cols)
+const char* parse_line(const char* cur_line,
+                       char* word_buf,
+                       float* float_data,
+                       size_t max_word_len,
+                       size_t cols)
 {
     const char* tmp = cur_line;
     /* extract word token */
     size_t word_len = 0;
-    while(*tmp != ' ') {
-	word_buf[word_len++] = *tmp++;
+    while (*tmp != ' ') {
+        word_buf[word_len++] = *tmp++;
     }
     word_buf[word_len] = 0;
     tmp++;
-    if(word_len > max_word_len) {
-	while(*tmp != '\n') ++tmp;
+    if (word_len > max_word_len) {
+        while (*tmp != '\n')
+            ++tmp;
     } else {
-	for(size_t i=0;i<cols;i++) {
-        	*float_data++ = (float) fast_atof(tmp);
-    	}
+        for (size_t i = 0; i < cols; i++) {
+            *float_data++ = (float)fast_atof(tmp);
+        }
     }
-    while(*tmp != '\n') tmp++;
+    while (*tmp != '\n')
+        tmp++;
     return ++tmp;
 }
 
-const char*
-parse_line_f16(const char* cur_line,char* word_buf,uint16_t* float_data,size_t max_word_len,size_t cols)
-{
-    const char* tmp = cur_line;
-    /* extract word token */
-    size_t word_len = 0;
-    while(*tmp != ' ') {
-	word_buf[word_len++] = *tmp++;
-    }
-    word_buf[word_len] = 0;
-    tmp++;
-    if(word_len > max_word_len) {
-	while(*tmp != '\n') ++tmp;
-    } else {
-	size_t written_floats = 0;
-	for(size_t i=0;i<cols;i++) {
-		float f = (float) fast_atof(tmp);
-		uint32_t f32 = *((uint32_t*)(&f));
-		uint16_t f16 = basetable[(f32>>23)&0x1ff]+((f32&0x007fffff)>>shifttable[(f32>>23)&0x1ff]);
-        	*float_data++ = f16;
-		written_floats++;
-    	}
-    }
-    while(*tmp != '\n') tmp++;
-    return ++tmp;
-}
-
-
-vector_data read_vector_data(std::string file_name,size_t max_word_len)
+vector_data read_vector_data(std::string file_name, size_t max_word_len)
 {
     cl_timer<> cluster_start("read_vector_data");
     LOG_INFO << "Loading word vector data from " << file_name;
@@ -93,106 +63,49 @@ vector_data read_vector_data(std::string file_name,size_t max_word_len)
     // Determine file size
     fseek(f, 0, SEEK_END);
     size_t size = ftell(f);
-    char* file_data = new char[size+1];
+    char* file_data = new char[size + 1];
     rewind(f);
     {
-	cl_read_timer<> cluster_start("fread vector data file",size);
-    	fread(file_data, sizeof(char), size, f);
-    }  
+        cl_read_timer<> cluster_start("fread vector data file", size);
+        fread(file_data, sizeof(char), size, f);
+    }
     file_data[size] = 0;
     fclose(f);
 
     const char* cur_line = file_data;
-    int rows;int cols;
-    sscanf(cur_line,"%d %d\n",&rows,&cols);
-    float* float_data = new float[cols+1];
-    char word_buf[1024] = {0};
-    while(*cur_line != '\n') cur_line++;
+    int rows;
+    int cols;
+    sscanf(cur_line, "%d %d\n", &rows, &cols);
+    float* float_data = new float[cols + 1];
+    char word_buf[1024] = { 0 };
+    while (*cur_line != '\n')
+        cur_line++;
     cur_line++;
     boost::progress_display pd(rows);
     size_t skipped_words = 0;
-    vd.dat.reserve(rows*cols);
+    vd.dat.reserve(rows * cols);
     std::cout << "rows = " << rows << " cols = " << cols << std::endl;
-    auto prev_line = (const char*) file_data;
-    while( *cur_line != 0 ) {
-	prev_line = cur_line;
-	cur_line = parse_line(cur_line,word_buf,float_data,max_word_len,cols);
-	if(strlen(word_buf) > max_word_len) {
-		skipped_words++;
-		++pd;
-		continue;
-	}
+    auto prev_line = (const char*)file_data;
+    while (*cur_line != 0) {
+        prev_line = cur_line;
+        cur_line
+            = parse_line(cur_line, word_buf, float_data, max_word_len, cols);
+        if (strlen(word_buf) > max_word_len) {
+            skipped_words++;
+            ++pd;
+            continue;
+        }
         vd.word_str.emplace_back(word_buf);
-	vd.dat.insert(vd.dat.end(), float_data,float_data+cols);
-	++pd;
+        vd.dat.insert(vd.dat.end(), float_data, float_data + cols);
+        ++pd;
         vd.num_samples++;
     }
-    LOG_INFO << "skipped words = " << skipped_words << " (" 
-	<< float(skipped_words)/float(rows)*100.0 << "%)";
+    LOG_INFO << "skipped words = " << skipped_words << " ("
+             << float(skipped_words) / float(rows) * 100.0 << "%)";
     vd.num_features = cols;
     delete[] float_data;
     return vd;
 }
-
-vector_data_f16 read_vector_data_f16(std::string file_name,size_t max_word_len)
-{
-    generatetables();
-    cl_timer<> cluster_start("read_vector_data");
-    LOG_INFO << "Loading word vector data from " << file_name;
-    vector_data_f16 vd;
-    FILE* f = fopen(file_name.c_str(), "r");
-    // Determine file size
-    fseek(f, 0, SEEK_END);
-    size_t size = ftell(f);
-    char* file_data = new char[size+1];
-    rewind(f);
-    {
-	cl_read_timer<> cluster_start("fread vector data file",size);
-    	fread(file_data, sizeof(char), size, f);
-    }  
-    file_data[size] = 0;
-    fclose(f);
-
-    const char* cur_line = file_data;
-    int rows;int cols;
-    sscanf(cur_line,"%d %d\n",&rows,&cols);
-    uint16_t* float_data = new uint16_t[cols];
-    char word_buf[1024] = {0};
-    while(*cur_line != '\n') cur_line++;
-    cur_line++;
-    boost::progress_display pd(rows);
-    size_t skipped_words = 0;
-    vd.dat.reserve(rows*cols);
-    vd.word_str.reserve(rows);
-    std::cout << "rows = " << rows << " cols = " << cols << std::endl;
-    auto prev_line = (const char*) file_data;
-    while( *cur_line != 0 ) {
-	prev_line = cur_line;
-	cur_line = parse_line_f16(cur_line,word_buf,float_data,max_word_len,cols);
-	if(strlen(word_buf) > max_word_len) {
-		skipped_words++;
-		++pd;
-		continue;
-	}
-        vd.word_str.emplace_back(word_buf,strlen(word_buf));
-	vd.dat.insert(vd.dat.end(), float_data,float_data+cols);
-/*
-        std::cout << " word = '" << vd.word_str.back() << "'";
-        for(size_t i=0;i<cols;i++) {
-		std::cout << float_data[i] << " ";
-	}
-	std::cout << std::endl;
-*/
-	++pd;
-        vd.num_samples++;
-    }
-    LOG_INFO << "skipped words = " << skipped_words << " (" 
-	<< float(skipped_words)/float(rows)*100.0 << "%)";
-    vd.num_features = cols;
-    delete[] float_data;
-    return vd;
-}
-
 
 po::variables_map parse_cmdargs(int argc, char const* argv[])
 {
@@ -239,6 +152,15 @@ uint32_t generate_device_mask(std::string dev_list)
     return mask;
 }
 
+float compute_euq_distance(const float* a, const float* b, size_t n)
+{
+    float dist = 0.0f;
+    for (size_t i = 0; i < n; i++) {
+        dist += (a[i] - b[i]) * (a[i] - b[i]);
+    }
+    return sqrt(dist);
+}
+
 int main(int argc, char const* argv[])
 {
     logging::init();
@@ -263,7 +185,7 @@ int main(int argc, char const* argv[])
     LOG_INFO << "init = kmeans++";
     LOG_INFO << "metric = euclidean";
 
-    auto vec_data = read_vector_data(word_vec_file,max_word_len);
+    auto vec_data = read_vector_data(word_vec_file, max_word_len);
 
     size_t size_bytes = vec_data.dat.size() * sizeof(vec_data.dat[0]);
     LOG_INFO << "data size in MiB = "
@@ -278,21 +200,11 @@ int main(int argc, char const* argv[])
     LOG_INFO << "num_features = " << vec_data.num_features;
     LOG_INFO << "num_samples = " << vec_data.num_samples;
 
-    const float* input_samples = (const float*) vec_data.dat.data();
+    const float* input_samples = (const float*)vec_data.dat.data();
     std::vector<float> raw_out_centroids(num_clusters * vec_data.num_features);
     float* output_centroids = raw_out_centroids.data();
     std::vector<uint32_t> raw_out_assignments(vec_data.num_samples);
     uint32_t* output_assignments = raw_out_assignments.data();
-
-    /*
-        for(size_t i=0;i<vec_data.num_samples;i++) {
-            auto sptr = input_samples + i*vec_data.num_features;
-            std::cout << "("<<i<<") => ";
-            for(size_t j=0;j<vec_data.num_features;j++)
-                    std::cout << sptr[j] << " ";
-            std::cout << std::endl;
-        }
-    */
 
     float avg_distance = 0.0;
     {
@@ -320,23 +232,39 @@ int main(int argc, char const* argv[])
                   << std::endl;
 
         // (2) output clusters
-        std::unordered_multimap<uint32_t, std::string> clusters;
+        std::multimap<uint32_t, uint32_t> clusters;
+        std::vector<float> centroid_dists(raw_out_assignments.size());
+        std::vector<float> total_centroid_dists(num_clusters, 0.0f);
+        std::vector<float> centroid_sizes(num_clusters, 0.0f);
         for (size_t i = 0; i < raw_out_assignments.size(); i++) {
             size_t cid = raw_out_assignments[i];
-            std::string word = vec_data.word_str[i];
-            clusters.insert({ cid, word });
+
+            clusters.insert({ cid, i });
+
+            const float* centr
+                = output_centroids + (cid * vec_data.num_features);
+            const float* vecptr = input_samples + (i * vec_data.num_features);
+            centroid_dist[i]
+                = compute_euq_distance(centr, vecptr, vec_data.num_features);
+            total_centroid_dists[cid] += centroid_dist[i];
+            centroid_sizes[cid]++;
         }
 
-        for (auto& x : clusters)
-            std::cout << x.first << ": " << x.second << std::endl;
-
-	
-	for(size_t i=0;i<num_clusters;i++) {
-	    std::cout << "CENTROID " << i << ": ";
-	    for(size_t j=0;j<vec_data.num_features;j++) {
-		std::cout << output_centroids[i*vec_data.num_features+j] << " ";
-	    }
-	    std::cout << std::endl;
-	}	
+        for (auto& x : clusters) {
+            std::string word = vec_data.word_str[x.second];
+            auto dist = centroid_dist[x.second];
+            auto avg_dist
+                = total_centroid_dists[x.first] / centroid_sizes[x.first];
+            std::cout << x.first << ": " << word << " " << dist << " "
+                      << avg_dist << std::endl;
+        }
+        for (size_t i = 0; i < num_clusters; i++) {
+            std::cout << "CENTROID " << i << ": ";
+            for (size_t j = 0; j < vec_data.num_features; j++) {
+                std::cout << output_centroids[i * vec_data.num_features + j]
+                          << " ";
+            }
+            std::cout << std::endl;
+        }
     }
 }
